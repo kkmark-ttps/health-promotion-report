@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>健促填報管理系統</title>
+  <!-- 引入 Tailwind CSS 進行排版 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 引入 Lucide 圖示庫 -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- 引入 Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import {
+      getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+    import {
+      getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, query, orderBy
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+    // 這組設定值不是密碼，只是「連線指向」，真正的安全防線在 firestore.rules
+    // 複製自 常用小程式/firebase-config.js，維持單檔案可獨立分享的慣例
+    const firebaseConfig = {
+      apiKey: "AIzaSyCBGcqHZrugpTX9eQ0hK1IMGlZps4wDPKU",
+      authDomain: "my-teching-tools.firebaseapp.com",
+      projectId: "my-teching-tools",
+      storageBucket: "my-teching-tools.firebasestorage.app",
+      messagingSenderId: "892059582991",
+      appId: "1:892059582991:web:341c3fe84c4c2fe006597a"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const activitiesRef = collection(db, "health_promotion_activities");
+
+    // 7 大議題（新竹市）與六大範疇
+    const TOPICS = ['視力保健', '口腔保健', '健康體位', '菸檳防制', '安全教育與急救', '性教育', '全民健保（含正確用藥）'];
+    const DOMAINS = ['學校衛生政策', '學校物質環境', '學校社會環境', '健康生活技能教學與行動', '社區關係', '健康服務'];
+    const STATUSES = ['未填報', '填報中', '填報完成'];
+
+    let unsubscribeSnapshot = null;
+    let allActivities = [];
+
+    // ---------- DOM 參照 ----------
+    const loginView = document.getElementById('loginView');
+    const appView = document.getElementById('appView');
+    const loginForm = document.getElementById('loginForm');
+    const loginError = document.getElementById('loginError');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const userEmailLabel = document.getElementById('userEmailLabel');
+    const topicOverview = document.getElementById('topicOverview');
+    const activityTableBody = document.getElementById('activityTableBody');
+    const emptyState = document.getElementById('emptyState');
+    const activityForm = document.getElementById('activityForm');
+    const formError = document.getElementById('formError');
+
+    // ---------- 表單下拉選單初始化 ----------
+    function fillSelect(select, options) {
+      select.innerHTML = options.map(o => `<option value="${o}">${o}</option>`).join('');
+    }
+    fillSelect(document.getElementById('categoryInput'), TOPICS);
+    fillSelect(document.getElementById('domainInput'), DOMAINS);
+    fillSelect(document.getElementById('statusInput'), STATUSES);
+
+    // ---------- 登入 / 登出 ----------
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      loginError.classList.add('hidden');
+      const email = document.getElementById('emailInput').value.trim();
+      const password = document.getElementById('passwordInput').value;
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (err) {
+        loginError.textContent = '登入失敗，請確認帳號密碼是否正確。';
+        loginError.classList.remove('hidden');
+      }
+    });
+
+    logoutBtn.addEventListener('click', () => signOut(auth));
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        loginView.classList.add('hidden');
+        appView.classList.remove('hidden');
+        userEmailLabel.textContent = user.email;
+        startListening();
+      } else {
+        appView.classList.add('hidden');
+        loginView.classList.remove('hidden');
+        if (unsubscribeSnapshot) { unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+      }
+    });
+
+    // ---------- 即時監聽活動列表 ----------
+    function startListening() {
+      const q = query(activitiesRef, orderBy('date', 'desc'));
+      unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+        allActivities = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderTopicOverview();
+        renderActivityTable();
+      });
+    }
+
+    function renderTopicOverview() {
+      topicOverview.innerHTML = TOPICS.map(topic => {
+        const count = allActivities.filter(a => a.category === topic).length;
+        const isEmpty = count === 0;
+        return `
+          <div class="p-4 rounded-xl border ${isEmpty ? 'bg-red-50 border-red-100' : 'bg-white border-slate-100'}">
+            <p class="text-sm font-medium ${isEmpty ? 'text-red-600' : 'text-slate-600'}">${topic}</p>
+            <p class="text-2xl font-bold mt-1 ${isEmpty ? 'text-red-500' : 'text-blue-600'}">${count}<span class="text-sm font-normal ml-1">筆</span></p>
+            ${isEmpty ? '<p class="text-xs text-red-400 mt-1">尚無紀錄</p>' : ''}
+          </div>
+        `;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    function renderActivityTable() {
+      if (allActivities.length === 0) {
+        emptyState.classList.remove('hidden');
+        activityTableBody.innerHTML = '';
+        return;
+      }
+      emptyState.classList.add('hidden');
+
+      const statusColor = {
+        '未填報': 'bg-red-50 text-red-600 border-red-100',
+        '填報中': 'bg-amber-50 text-amber-600 border-amber-100',
+        '填報完成': 'bg-emerald-50 text-emerald-600 border-emerald-100'
+      };
+
+      activityTableBody.innerHTML = allActivities.map(a => `
+        <tr class="hover:bg-blue-50/50 transition-colors bg-white">
+          <td class="py-3 px-4 text-slate-600 whitespace-nowrap">${a.date || ''}</td>
+          <td class="py-3 px-4 whitespace-nowrap"><span class="bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100 text-xs font-medium">${a.category || ''}</span></td>
+          <td class="py-3 px-4 font-medium text-slate-800 whitespace-nowrap">${a.title || ''}</td>
+          <td class="py-3 px-4 text-slate-500 text-xs">${a.domain || ''}</td>
+          <td class="py-3 px-4 whitespace-nowrap">
+            ${a.report_url ? `<a href="${a.report_url}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-sm inline-flex items-center gap-1"><i data-lucide="external-link" class="w-3.5 h-3.5"></i>報告連結</a>` : '<span class="text-slate-300 text-sm">無</span>'}
+          </td>
+          <td class="py-3 px-4">
+            <select data-id="${a.id}" class="statusSelect px-2 py-1 rounded-full border text-xs font-medium cursor-pointer ${statusColor[a.status] || ''}">
+              ${STATUSES.map(s => `<option value="${s}" ${s === a.status ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </td>
+          <td class="py-3 px-4 text-right">
+            <button data-id="${a.id}" class="deleteBtn text-slate-400 hover:text-red-500 transition-colors">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </td>
+        </tr>
+      `).join('');
+
+      lucide.createIcons();
+
+      document.querySelectorAll('.statusSelect').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          await updateDoc(doc(db, 'health_promotion_activities', sel.dataset.id), { status: sel.value });
+        });
+      });
+
+      document.querySelectorAll('.deleteBtn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (confirm('確定要刪除這筆活動紀錄嗎？')) {
+            await deleteDoc(doc(db, 'health_promotion_activities', btn.dataset.id));
+          }
+        });
+      });
+    }
+
+    // ---------- 新增活動 ----------
+    activityForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      formError.classList.add('hidden');
+
+      const data = {
+        date: document.getElementById('dateInput').value,
+        category: document.getElementById('categoryInput').value,
+        title: document.getElementById('titleInput').value.trim(),
+        report_url: document.getElementById('reportUrlInput').value.trim(),
+        domain: document.getElementById('domainInput').value,
+        status: document.getElementById('statusInput').value,
+        created_at: serverTimestamp()
+      };
+
+      if (!data.date || !data.title) {
+        formError.textContent = '請填寫日期與標題。';
+        formError.classList.remove('hidden');
+        return;
+      }
+
+      try {
+        await addDoc(activitiesRef, data);
+        activityForm.reset();
+        fillSelect(document.getElementById('categoryInput'), TOPICS);
+        fillSelect(document.getElementById('domainInput'), DOMAINS);
+        fillSelect(document.getElementById('statusInput'), STATUSES);
+      } catch (err) {
+        formError.textContent = '新增失敗：' + err.message;
+        formError.classList.remove('hidden');
+      }
+    });
+
+    lucide.createIcons();
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen">
+
+  <!-- 登入畫面 -->
+  <div id="loginView" class="min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 w-full max-w-sm">
+      <div class="flex items-center gap-3 mb-6">
+        <div class="bg-blue-600 p-3 rounded-xl text-white shadow-lg shadow-blue-200">
+          <i data-lucide="shield-check" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-slate-900">健促填報管理系統</h1>
+          <p class="text-slate-400 text-xs mt-0.5">請先登入</p>
+        </div>
+      </div>
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Email</label>
+          <input type="email" id="emailInput" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">密碼</label>
+          <input type="password" id="passwordInput" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+        </div>
+        <div id="loginError" class="hidden p-3 bg-red-50 text-red-600 text-sm rounded-lg"></div>
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition-colors">登入</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 主畫面 -->
+  <div id="appView" class="hidden p-4 md:p-8 max-w-6xl mx-auto space-y-6">
+
+    <!-- 頁首 -->
+    <div class="flex items-center justify-between mb-8">
+      <div class="flex items-center gap-3">
+        <div class="bg-blue-600 p-3 rounded-xl text-white shadow-lg shadow-blue-200">
+          <i data-lucide="clipboard-list" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="text-2xl md:text-3xl font-bold text-slate-900">健促填報管理系統</h1>
+          <p class="text-slate-500 text-sm mt-1">新竹市健康促進 7 大議題 × 六大範疇填報紀錄</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 text-sm">
+        <span id="userEmailLabel" class="text-slate-400"></span>
+        <button id="logoutBtn" class="flex items-center gap-1 text-slate-500 hover:text-red-500 transition-colors">
+          <i data-lucide="log-out" class="w-4 h-4"></i>登出
+        </button>
+      </div>
+    </div>
+
+    <!-- 議題覆蓋總覽 -->
+    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+      <div class="flex items-center gap-2 mb-4 text-slate-800 font-semibold">
+        <i data-lucide="layout-grid" class="w-5 h-5 text-blue-600"></i>
+        <h2>議題覆蓋總覽</h2>
+      </div>
+      <div id="topicOverview" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- 新增活動表單 -->
+      <div class="lg:col-span-1">
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <div class="flex items-center gap-2 mb-4 text-slate-800 font-semibold">
+            <i data-lucide="plus-circle" class="w-5 h-5 text-emerald-600"></i>
+            <h2>新增活動</h2>
+          </div>
+          <form id="activityForm" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">日期</label>
+              <input type="date" id="dateInput" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">議題類別</label>
+              <select id="categoryInput" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"></select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">活動標題</label>
+              <input type="text" id="titleInput" required maxlength="100" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">成果報告連結（Google Drive）</label>
+              <input type="url" id="reportUrlInput" placeholder="https://drive.google.com/..." class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">對應範疇</label>
+              <select id="domainInput" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"></select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">填報狀態</label>
+              <select id="statusInput" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"></select>
+            </div>
+            <div id="formError" class="hidden p-3 bg-red-50 text-red-600 text-sm rounded-lg"></div>
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition-colors">新增</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- 活動列表 -->
+      <div class="lg:col-span-2">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div class="p-4 md:p-6 border-b border-slate-100">
+            <h2 class="text-lg font-bold text-slate-800">活動列表</h2>
+          </div>
+          <div class="overflow-x-auto relative min-h-[300px]">
+            <div id="emptyState" class="hidden absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-12">
+              <i data-lucide="inbox" class="w-12 h-12 mb-4 opacity-20"></i>
+              <p>尚無活動紀錄</p>
+            </div>
+            <table class="w-full text-left border-collapse min-w-[700px]">
+              <thead class="sticky top-0 z-10 bg-slate-100/90 backdrop-blur-sm">
+                <tr class="text-slate-600 text-sm">
+                  <th class="py-3 px-4 font-semibold whitespace-nowrap">日期</th>
+                  <th class="py-3 px-4 font-semibold whitespace-nowrap">議題</th>
+                  <th class="py-3 px-4 font-semibold whitespace-nowrap">標題</th>
+                  <th class="py-3 px-4 font-semibold whitespace-nowrap">對應範疇</th>
+                  <th class="py-3 px-4 font-semibold whitespace-nowrap">成果報告</th>
+                  <th class="py-3 px-4 font-semibold whitespace-nowrap">填報狀態</th>
+                  <th class="py-3 px-4"></th>
+                </tr>
+              </thead>
+              <tbody id="activityTableBody" class="divide-y divide-slate-100 text-sm"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>
