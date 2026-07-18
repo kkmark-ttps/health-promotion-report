@@ -57,6 +57,7 @@
     const searchInput = document.getElementById('searchInput');
     const categoryFilter = document.getElementById('categoryFilter');
     const exportCsvBtn = document.getElementById('exportCsvBtn');
+    const printBtn = document.getElementById('printBtn');
     const emptyStateText = document.getElementById('emptyStateText');
 
     // ---------- 表單下拉選單初始化 ----------
@@ -96,6 +97,9 @@
       a.click();
       URL.revokeObjectURL(url);
     });
+
+    // ---------- 列印 ----------
+    printBtn.addEventListener('click', () => window.print());
 
     // ---------- 登入 / 登出 ----------
     loginForm.addEventListener('submit', async (e) => {
@@ -188,11 +192,12 @@
             ${a.report_url ? `<a href="${a.report_url}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-sm inline-flex items-center gap-1"><i data-lucide="external-link" class="w-3.5 h-3.5"></i>報告連結</a>` : '<span class="text-slate-300 text-sm">無</span>'}
           </td>
           <td class="py-3 px-4">
-            <select data-id="${a.id}" class="statusSelect px-2 py-1 rounded-full border text-xs font-medium cursor-pointer ${statusColor[a.status] || ''}">
+            <select data-id="${a.id}" class="statusSelect print:hidden px-2 py-1 rounded-full border text-xs font-medium cursor-pointer ${statusColor[a.status] || ''}">
               ${STATUSES.map(s => `<option value="${s}" ${s === a.status ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
+            <span class="hidden print:inline text-xs font-medium">${a.status || ''}</span>
           </td>
-          <td class="py-3 px-4 text-right">
+          <td class="py-3 px-4 text-right print:hidden">
             <button data-id="${a.id}" class="deleteBtn text-slate-400 hover:text-red-500 transition-colors">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
@@ -283,7 +288,7 @@
   </div>
 
   <!-- 主畫面 -->
-  <div id="appView" class="hidden p-4 md:p-8 max-w-6xl mx-auto space-y-6">
+  <div id="appView" class="hidden p-4 md:p-8 print:p-0 max-w-6xl mx-auto space-y-6">
 
     <!-- 頁首 -->
     <div class="flex items-center justify-between mb-8">
@@ -296,7 +301,7 @@
           <p class="text-slate-500 text-sm mt-1">新竹市健康促進 7 大議題 × 六大範疇填報紀錄</p>
         </div>
       </div>
-      <div class="flex items-center gap-3 text-sm">
+      <div class="flex items-center gap-3 text-sm print:hidden">
         <span id="userEmailLabel" class="text-slate-400"></span>
         <button id="logoutBtn" class="flex items-center gap-1 text-slate-500 hover:text-red-500 transition-colors">
           <i data-lucide="log-out" class="w-4 h-4"></i>登出
@@ -305,7 +310,7 @@
     </div>
 
     <!-- 議題覆蓋總覽 -->
-    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 print:hidden">
       <div class="flex items-center gap-2 mb-4 text-slate-800 font-semibold">
         <i data-lucide="layout-grid" class="w-5 h-5 text-blue-600"></i>
         <h2>議題覆蓋總覽</h2>
@@ -313,10 +318,10 @@
       <div id="topicOverview" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 print:block">
 
       <!-- 新增活動表單 -->
-      <div class="lg:col-span-1">
+      <div class="lg:col-span-1 print:hidden">
         <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <div class="flex items-center gap-2 mb-4 text-slate-800 font-semibold">
             <i data-lucide="plus-circle" class="w-5 h-5 text-emerald-600"></i>
@@ -354,11 +359,11 @@
       </div>
 
       <!-- 活動列表 -->
-      <div class="lg:col-span-2">
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div class="p-4 md:p-6 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
+      <div class="lg:col-span-2 print:col-span-1">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden print:shadow-none print:border-none">
+          <div class="p-4 md:p-6 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap print:border-none">
             <h2 class="text-lg font-bold text-slate-800">活動列表</h2>
-            <div class="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+            <div class="flex items-center gap-3 w-full sm:w-auto flex-wrap print:hidden">
               <select id="categoryFilter" class="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
                 <option value="">全部議題</option>
               </select>
@@ -369,15 +374,18 @@
               <button id="exportCsvBtn" class="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-100 rounded-lg text-sm font-medium transition-colors">
                 <i data-lucide="download" class="w-4 h-4"></i>匯出 CSV
               </button>
+              <button id="printBtn" class="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-lg text-sm font-medium transition-colors">
+                <i data-lucide="printer" class="w-4 h-4"></i>列印
+              </button>
             </div>
           </div>
-          <div class="overflow-x-auto relative min-h-[300px]">
+          <div class="overflow-x-auto relative min-h-[300px] print:overflow-visible">
             <div id="emptyState" class="hidden absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-12">
               <i data-lucide="inbox" class="w-12 h-12 mb-4 opacity-20"></i>
               <p id="emptyStateText">尚無活動紀錄</p>
             </div>
-            <table class="w-full text-left border-collapse min-w-[700px]">
-              <thead class="sticky top-0 z-10 bg-slate-100/90 backdrop-blur-sm">
+            <table class="w-full text-left border-collapse min-w-[700px] print:min-w-0">
+              <thead class="sticky top-0 z-10 bg-slate-100/90 backdrop-blur-sm print:static">
                 <tr class="text-slate-600 text-sm">
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">日期</th>
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">議題</th>
@@ -385,7 +393,7 @@
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">對應範疇</th>
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">成果報告</th>
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">填報狀態</th>
-                  <th class="py-3 px-4"></th>
+                  <th class="py-3 px-4 print:hidden"></th>
                 </tr>
               </thead>
               <tbody id="activityTableBody" class="divide-y divide-slate-100 text-sm"></tbody>
