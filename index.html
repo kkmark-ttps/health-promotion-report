@@ -54,6 +54,8 @@
     const emptyState = document.getElementById('emptyState');
     const activityForm = document.getElementById('activityForm');
     const formError = document.getElementById('formError');
+    const searchInput = document.getElementById('searchInput');
+    const emptyStateText = document.getElementById('emptyStateText');
 
     // ---------- 表單下拉選單初始化 ----------
     function fillSelect(select, options) {
@@ -62,6 +64,9 @@
     fillSelect(document.getElementById('categoryInput'), TOPICS);
     fillSelect(document.getElementById('domainInput'), DOMAINS);
     fillSelect(document.getElementById('statusInput'), STATUSES);
+
+    // ---------- 搜尋 ----------
+    searchInput.addEventListener('input', renderActivityTable);
 
     // ---------- 登入 / 登出 ----------
     loginForm.addEventListener('submit', async (e) => {
@@ -117,9 +122,18 @@
       lucide.createIcons();
     }
 
+    function getFilteredActivities() {
+      const keyword = searchInput.value.trim().toLowerCase();
+      if (!keyword) return allActivities;
+      return allActivities.filter(a => (a.title || '').toLowerCase().includes(keyword));
+    }
+
     function renderActivityTable() {
-      if (allActivities.length === 0) {
+      const filtered = getFilteredActivities();
+
+      if (filtered.length === 0) {
         emptyState.classList.remove('hidden');
+        emptyStateText.textContent = allActivities.length === 0 ? '尚無活動紀錄' : '查無符合的活動';
         activityTableBody.innerHTML = '';
         return;
       }
@@ -131,7 +145,7 @@
         '填報完成': 'bg-emerald-50 text-emerald-600 border-emerald-100'
       };
 
-      activityTableBody.innerHTML = allActivities.map(a => `
+      activityTableBody.innerHTML = filtered.map(a => `
         <tr class="hover:bg-blue-50/50 transition-colors bg-white">
           <td class="py-3 px-4 text-slate-600 whitespace-nowrap">${a.date || ''}</td>
           <td class="py-3 px-4 whitespace-nowrap"><span class="bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100 text-xs font-medium">${a.category || ''}</span></td>
@@ -309,13 +323,17 @@
       <!-- 活動列表 -->
       <div class="lg:col-span-2">
         <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div class="p-4 md:p-6 border-b border-slate-100">
+          <div class="p-4 md:p-6 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
             <h2 class="text-lg font-bold text-slate-800">活動列表</h2>
+            <div class="relative w-full sm:w-64">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+              <input type="text" id="searchInput" placeholder="搜尋活動標題..." class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+            </div>
           </div>
           <div class="overflow-x-auto relative min-h-[300px]">
             <div id="emptyState" class="hidden absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-12">
               <i data-lucide="inbox" class="w-12 h-12 mb-4 opacity-20"></i>
-              <p>尚無活動紀錄</p>
+              <p id="emptyStateText">尚無活動紀錄</p>
             </div>
             <table class="w-full text-left border-collapse min-w-[700px]">
               <thead class="sticky top-0 z-10 bg-slate-100/90 backdrop-blur-sm">
