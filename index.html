@@ -56,6 +56,7 @@
     const formError = document.getElementById('formError');
     const searchInput = document.getElementById('searchInput');
     const categoryFilter = document.getElementById('categoryFilter');
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
     const emptyStateText = document.getElementById('emptyStateText');
 
     // ---------- 表單下拉選單初始化 ----------
@@ -70,6 +71,31 @@
     // ---------- 搜尋 / 類別篩選 ----------
     searchInput.addEventListener('input', renderActivityTable);
     categoryFilter.addEventListener('change', renderActivityTable);
+
+    // ---------- 匯出 CSV ----------
+    function csvEscape(value) {
+      const text = String(value ?? '');
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+
+    exportCsvBtn.addEventListener('click', () => {
+      const rows = getFilteredActivities();
+      const header = ['日期', '議題類別', '活動標題', '對應範疇', '填報狀態', '成果報告連結'];
+      const lines = [header.map(csvEscape).join(',')];
+      rows.forEach(a => {
+        lines.push([a.date, a.category, a.title, a.domain, a.status, a.report_url].map(csvEscape).join(','));
+      });
+
+      const csvContent = '﻿' + lines.join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `健促填報_${timestamp}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
 
     // ---------- 登入 / 登出 ----------
     loginForm.addEventListener('submit', async (e) => {
@@ -340,6 +366,9 @@
                 <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
                 <input type="text" id="searchInput" placeholder="搜尋活動標題..." class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
               </div>
+              <button id="exportCsvBtn" class="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-100 rounded-lg text-sm font-medium transition-colors">
+                <i data-lucide="download" class="w-4 h-4"></i>匯出 CSV
+              </button>
             </div>
           </div>
           <div class="overflow-x-auto relative min-h-[300px]">
