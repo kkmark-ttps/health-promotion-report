@@ -55,6 +55,7 @@
     const activityForm = document.getElementById('activityForm');
     const formError = document.getElementById('formError');
     const searchInput = document.getElementById('searchInput');
+    const categoryFilter = document.getElementById('categoryFilter');
     const emptyStateText = document.getElementById('emptyStateText');
 
     // ---------- 表單下拉選單初始化 ----------
@@ -64,9 +65,11 @@
     fillSelect(document.getElementById('categoryInput'), TOPICS);
     fillSelect(document.getElementById('domainInput'), DOMAINS);
     fillSelect(document.getElementById('statusInput'), STATUSES);
+    categoryFilter.insertAdjacentHTML('beforeend', TOPICS.map(t => `<option value="${t}">${t}</option>`).join(''));
 
-    // ---------- 搜尋 ----------
+    // ---------- 搜尋 / 類別篩選 ----------
     searchInput.addEventListener('input', renderActivityTable);
+    categoryFilter.addEventListener('change', renderActivityTable);
 
     // ---------- 登入 / 登出 ----------
     loginForm.addEventListener('submit', async (e) => {
@@ -124,8 +127,12 @@
 
     function getFilteredActivities() {
       const keyword = searchInput.value.trim().toLowerCase();
-      if (!keyword) return allActivities;
-      return allActivities.filter(a => (a.title || '').toLowerCase().includes(keyword));
+      const category = categoryFilter.value;
+      return allActivities.filter(a => {
+        const matchesKeyword = !keyword || (a.title || '').toLowerCase().includes(keyword);
+        const matchesCategory = !category || a.category === category;
+        return matchesKeyword && matchesCategory;
+      });
     }
 
     function renderActivityTable() {
@@ -325,9 +332,14 @@
         <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
           <div class="p-4 md:p-6 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
             <h2 class="text-lg font-bold text-slate-800">活動列表</h2>
-            <div class="relative w-full sm:w-64">
-              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
-              <input type="text" id="searchInput" placeholder="搜尋活動標題..." class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+            <div class="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+              <select id="categoryFilter" class="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+                <option value="">全部議題</option>
+              </select>
+              <div class="relative w-full sm:w-64">
+                <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                <input type="text" id="searchInput" placeholder="搜尋活動標題..." class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+              </div>
             </div>
           </div>
           <div class="overflow-x-auto relative min-h-[300px]">
