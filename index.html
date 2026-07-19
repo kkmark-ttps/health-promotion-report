@@ -98,6 +98,7 @@
 
     let unsubscribeSnapshot = null;
     let allActivities = [];
+    let editingReportUrlId = null; // 目前正在編輯成果報告連結的活動 id，同時只能編輯一筆
 
     // ---------- DOM 參照 ----------
     const loginView = document.getElementById('loginView');
@@ -251,7 +252,20 @@
           <td class="py-3 px-4 font-medium text-slate-800 whitespace-nowrap">${a.title || ''}</td>
           <td class="py-3 px-4 text-slate-500 text-xs">${a.domain || ''}</td>
           <td class="py-3 px-4 whitespace-nowrap">
-            ${a.report_url ? `<a href="${a.report_url}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-sm inline-flex items-center gap-1"><i data-lucide="external-link" class="w-3.5 h-3.5"></i>報告連結</a>` : '<span class="text-slate-300 text-sm">無</span>'}
+            ${editingReportUrlId === a.id ? `
+              <div class="flex items-center gap-1.5 print:hidden">
+                <input type="url" class="reportUrlInput text-xs px-2 py-1 border border-slate-200 rounded-lg w-40 focus:outline-none focus:ring-2 focus:ring-blue-500" data-id="${a.id}" value="${a.report_url || ''}" placeholder="https://drive.google.com/...">
+                <button data-id="${a.id}" class="saveReportUrlBtn text-emerald-600 hover:text-emerald-700"><i data-lucide="check" class="w-4 h-4"></i></button>
+                <button data-id="${a.id}" class="cancelReportUrlBtn text-slate-400 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button>
+              </div>
+            ` : `
+              <div class="flex items-center gap-1.5">
+                ${a.report_url ? `<a href="${a.report_url}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-sm inline-flex items-center gap-1"><i data-lucide="external-link" class="w-3.5 h-3.5"></i>報告連結</a>` : '<span class="text-slate-300 text-sm">無</span>'}
+                <button data-id="${a.id}" class="editReportUrlBtn print:hidden text-slate-300 hover:text-blue-500 transition-colors" title="編輯成果報告連結">
+                  <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            `}
           </td>
           <td class="py-3 px-4">
             <select data-id="${a.id}" class="statusSelect print:hidden px-2 py-1 rounded-full border text-xs font-medium cursor-pointer ${statusColor[a.status] || ''}">
@@ -280,6 +294,43 @@
           if (confirm('確定要刪除這筆活動紀錄嗎？')) {
             await deleteDoc(doc(db, 'health_promotion_activities', btn.dataset.id));
           }
+        });
+      });
+
+      // ---------- 編輯成果報告連結 ----------
+      document.querySelectorAll('.editReportUrlBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          editingReportUrlId = btn.dataset.id;
+          renderActivityTable();
+          document.querySelector(`.reportUrlInput[data-id="${btn.dataset.id}"]`)?.focus();
+        });
+      });
+
+      document.querySelectorAll('.cancelReportUrlBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          editingReportUrlId = null;
+          renderActivityTable();
+        });
+      });
+
+      async function saveReportUrl(id) {
+        const input = document.querySelector(`.reportUrlInput[data-id="${id}"]`);
+        try {
+          await updateDoc(doc(db, 'health_promotion_activities', id), { report_url: input.value.trim() });
+          editingReportUrlId = null;
+        } catch (err) {
+          alert('更新失敗：' + err.message);
+        }
+      }
+
+      document.querySelectorAll('.saveReportUrlBtn').forEach(btn => {
+        btn.addEventListener('click', () => saveReportUrl(btn.dataset.id));
+      });
+
+      document.querySelectorAll('.reportUrlInput').forEach(input => {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') saveReportUrl(input.dataset.id);
+          if (e.key === 'Escape') { editingReportUrlId = null; renderActivityTable(); }
         });
       });
     }
