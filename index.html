@@ -17,6 +17,9 @@
     import {
       getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, query, orderBy
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+    import {
+      getStorage, ref as storageRef, uploadBytes, getDownloadURL
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 
     // 這組設定值不是密碼，只是「連線指向」，真正的安全防線在 firestore.rules
     // 複製自 常用小程式/firebase-config.js，維持單檔案可獨立分享的慣例
@@ -32,7 +35,61 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
+    const storage = getStorage(app);
     const activitiesRef = collection(db, "health_promotion_activities");
+    const MAX_PHOTO_SIZE = 1 * 1024 * 1024; // 對應 storage.rules 的 1MB 上限，超過的照片由前端自動壓縮
+    const MAX_PHOTO_COUNT = 4; // 對應 firestore.rules 的 photo_urls.size() <= 4
+
+    // ---------- 照片壓縮：把手機拍的原始照片壓到 1MB 以內才上傳 ----------
+    function loadImageSource(file) {
+      if (window.createImageBitmap) {
+        return createImageBitmap(file, { imageOrientation: 'from-image' }); // 自動修正手機拍照的方向資訊
+      }
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    function canvasToJpegBlob(canvas, quality) {
+      return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    }
+
+    async function compressImage(file, maxBytes) {
+      const source = await loadImageSource(file);
+      const srcWidth = source.width;
+      const srcHeight = source.height;
+
+      let maxDimension = 1600;
+      let quality = 0.85;
+      let blob = null;
+
+      // 逐步縮小畫質，畫質降到底之後改縮小尺寸，最多試 8 輪
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const scale = Math.min(1, maxDimension / Math.max(srcWidth, srcHeight));
+        const width = Math.max(1, Math.round(srcWidth * scale));
+        const height = Math.max(1, Math.round(srcHeight * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(source, 0, 0, width, height);
+
+        blob = await canvasToJpegBlob(canvas, quality);
+        if (blob.size <= maxBytes) return blob;
+
+        if (quality > 0.5) {
+          quality -= 0.1;
+        } else {
+          maxDimension = Math.round(maxDimension * 0.8);
+          quality = 0.85;
+        }
+      }
+
+      return blob; // 盡力壓縮後的結果，呼叫端會再檢查是否真的壓到範圍內
+    }
 
     // 7 大議題（新竹市）與六大範疇
     const TOPICS = ['視力保健', '口腔保健', '健康體位', '菸檳防制', '安全教育與急救', '性教育', '全民健保（含正確用藥）'];
@@ -185,6 +242,11 @@
       activityTableBody.innerHTML = filtered.map(a => `
         <tr class="hover:bg-blue-50/50 transition-colors bg-white">
           <td class="py-3 px-4 text-slate-600 whitespace-nowrap">${a.date || ''}</td>
+          <td class="py-3 px-4 print:hidden">
+            ${(a.photo_urls && a.photo_urls.length)
+              ? `<div class="grid grid-cols-2 gap-1 w-[62px]">${a.photo_urls.map(url => `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="活動照片縮圖" class="w-7 h-7 object-cover rounded border border-slate-200 hover:opacity-80 transition-opacity"></a>`).join('')}</div>`
+              : '<span class="text-slate-300 text-xs">無</span>'}
+          </td>
           <td class="py-3 px-4 whitespace-nowrap"><span class="bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100 text-xs font-medium">${a.category || ''}</span></td>
           <td class="py-3 px-4 font-medium text-slate-800 whitespace-nowrap">${a.title || ''}</td>
           <td class="py-3 px-4 text-slate-500 text-xs">${a.domain || ''}</td>
@@ -223,9 +285,24 @@
     }
 
     // ---------- 新增活動 ----------
+    const submitBtn = activityForm.querySelector('button[type="submit"]');
+
     activityForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       formError.classList.add('hidden');
+
+      const photoFiles = Array.from(document.getElementById('photoInput').files);
+
+      if (photoFiles.length > MAX_PHOTO_COUNT) {
+        formError.textContent = `照片最多選 ${MAX_PHOTO_COUNT} 張，請重新選擇。`;
+        formError.classList.remove('hidden');
+        return;
+      }
+      if (photoFiles.some(f => !f.type.startsWith('image/'))) {
+        formError.textContent = '照片檔案格式不符，請選擇圖片檔（jpg/png 等）。';
+        formError.classList.remove('hidden');
+        return;
+      }
 
       const data = {
         date: document.getElementById('dateInput').value,
@@ -234,6 +311,7 @@
         report_url: document.getElementById('reportUrlInput').value.trim(),
         domain: document.getElementById('domainInput').value,
         status: document.getElementById('statusInput').value,
+        photo_urls: [],
         created_at: serverTimestamp()
       };
 
@@ -243,7 +321,27 @@
         return;
       }
 
+      submitBtn.disabled = true;
+      submitBtn.textContent = '新增中...';
+
       try {
+        const timestamp = Date.now();
+        for (let i = 0; i < photoFiles.length; i++) {
+          const file = photoFiles[i];
+
+          submitBtn.textContent = `照片壓縮中 (${i + 1}/${photoFiles.length})...`;
+          const compressed = await compressImage(file, MAX_PHOTO_SIZE);
+          if (compressed.size > MAX_PHOTO_SIZE) {
+            throw new Error(`第 ${i + 1} 張照片壓縮後仍超過 1MB，請換一張畫面較簡單或解析度較低的照片再試一次。`);
+          }
+
+          submitBtn.textContent = `照片上傳中 (${i + 1}/${photoFiles.length})...`;
+          const baseName = file.name.replace(/\.[^.]+$/, '') || 'photo';
+          const fileRef = storageRef(storage, `activity_photos/${timestamp}_${i}_${baseName}.jpg`);
+          await uploadBytes(fileRef, compressed, { contentType: 'image/jpeg' });
+          data.photo_urls.push(await getDownloadURL(fileRef));
+        }
+
         await addDoc(activitiesRef, data);
         activityForm.reset();
         fillSelect(document.getElementById('categoryInput'), TOPICS);
@@ -252,6 +350,9 @@
       } catch (err) {
         formError.textContent = '新增失敗：' + err.message;
         formError.classList.remove('hidden');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '新增';
       }
     });
 
@@ -345,6 +446,10 @@
               <input type="url" id="reportUrlInput" placeholder="https://drive.google.com/..." class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
             </div>
             <div>
+              <label class="block text-sm font-medium text-slate-600 mb-1">活動照片（選填，最多 4 張，每張自動壓縮至 1MB 以內）</label>
+              <input type="file" id="photoInput" accept="image/*" multiple class="w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:text-sm file:font-medium hover:file:bg-blue-100">
+            </div>
+            <div>
               <label class="block text-sm font-medium text-slate-600 mb-1">對應範疇</label>
               <select id="domainInput" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"></select>
             </div>
@@ -388,6 +493,7 @@
               <thead class="sticky top-0 z-10 bg-slate-100/90 backdrop-blur-sm print:static">
                 <tr class="text-slate-600 text-sm">
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">日期</th>
+                  <th class="py-3 px-4 font-semibold whitespace-nowrap print:hidden">照片</th>
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">議題</th>
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">標題</th>
                   <th class="py-3 px-4 font-semibold whitespace-nowrap">對應範疇</th>
