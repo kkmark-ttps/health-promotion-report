@@ -18,7 +18,7 @@
       getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, query, orderBy
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
     import {
-      getStorage, ref as storageRef, uploadBytes, getDownloadURL
+      getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 
     // 這組設定值不是密碼，只是「連線指向」，真正的安全防線在 firestore.rules
@@ -292,6 +292,13 @@
       document.querySelectorAll('.deleteBtn').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (confirm('確定要刪除這筆活動紀錄嗎？')) {
+            const activity = allActivities.find(a => a.id === btn.dataset.id);
+            if (activity?.photo_urls?.length) {
+              // 照片存在 Storage、不會跟著 Firestore 文件一起刪，這裡要手動清掉，避免留下孤兒檔案
+              await Promise.all(activity.photo_urls.map(url =>
+                deleteObject(storageRef(storage, url)).catch(() => {})
+              ));
+            }
             await deleteDoc(doc(db, 'health_promotion_activities', btn.dataset.id));
           }
         });
@@ -318,6 +325,7 @@
         try {
           await updateDoc(doc(db, 'health_promotion_activities', id), { report_url: input.value.trim() });
           editingReportUrlId = null;
+          renderActivityTable();
         } catch (err) {
           alert('更新失敗：' + err.message);
         }
